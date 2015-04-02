@@ -14,18 +14,28 @@ d3.sgnest = function() {
       childrenF = d3_layout_hierarchyChildren,
       valueF, // could be d3_layout_hierarchyValue, but want it to default to nothing
       //sortF,  // d3_layout_hierarchySort
+      cloneRecords = true,
       leafNodesAreGroups = true;
 
-  function map(mapType, array, depth) {
+  function map(mapType, array, depth, parentMap) {
+    if (depth === 0 && cloneRecords) {
+        array = array.map(function(o) {
+            var clone = {};
+            for (key in o)
+                clone[key] = o[key];
+            return clone;
+        });
+    }
     if (depth >= keys.length) {
         var values = rollup ? rollup.call(nest, array) : 
                 (sortValues ? array.sort(sortValues) : array);
         if (values instanceof Array) {
             values.forEach(function(val) {
-                Object.defineProperty(val, "valueLevel", 
-                        { value: true });
+                addMeta(val, values, depth, parentMap);
+                val.meta.isRecord = true;
+                //Object.defineProperty(val, "valueLevel", { value: true });
             });
-            addMeta(values, values, depth);
+            //addMeta(values, values, depth);
         } else {
             throw new Error("never being called?");
             if (typeof values === "object")
@@ -44,7 +54,6 @@ d3.sgnest = function() {
         valuesByKey = new d3_Map,
         values;
 
-    //valuesByKey.set("allValues", array);
     while (++i < n) {
       if (values = valuesByKey.get(keyValue = key(object = array[i]))) {
         values.push(object);
@@ -55,28 +64,32 @@ d3.sgnest = function() {
 
     if (mapType) {
       object = mapType();
-      var o = object._;
       setter = function(keyValue, values) {
-        object.set(keyValue, map(mapType, values, depth));
+        object.set(keyValue, map(mapType, values, depth, object));
+        addMeta(object.get(keyValue), values, depth, object);
       };
     } else {
+      //  this is here (from original d3.nest) so it works without a d3_Map
       object = {};
-      var o = object;
       setter = function(keyValue, values) {
         object[keyValue] = map(mapType, values, depth);
+        addMeta(object[keyValue], values, depth, object);
       };
     }
-    addMeta(o, array, depth);
     valuesByKey.forEach(setter);
+    if (depth===1) addMeta(object, array, 0);
     return object;
   }
-  function addMeta(o, array, depth) {
+  function addMeta(o, array, depth, parentMap) {
     Object.defineProperty(o, "meta", {
-            value: {}
+            value: {
+                records: array,
+                depth: depth,
+            }
         });
-    o.meta.records = array;
     if (keynames.length)
-        o.meta.dim = keynames[depth-1];
+        o.meta.dim = (depth > 0) ? keynames[depth-1] : 'root';
+    if (parentMap) o.meta.parentMap = parentMap;
   }
 
   function entries(map, depth, parentNode) {
@@ -88,12 +101,12 @@ d3.sgnest = function() {
 
     map.forEach(function(key, keyMap) {
       var entry = {name: key};
-      entry.dim = map._.meta.dim;
+      entry.dim = keyMap.meta.dim;
       if (parentNode) entry.parentNode = parentNode;
       entry.parentList = array;
       var children = entries(keyMap, depth, entry, array);
       if (keyMap.constructor === d3_Map) {
-        entry.records = keyMap._.meta.records;
+        entry.records = keyMap.meta.records;
         entry.children = children;
       } else {
         entry.records = keyMap;
@@ -103,7 +116,6 @@ d3.sgnest = function() {
       d3_subclass(entry, node_prototype);
       array.push(entry);
     });
-    //if (map._.meta) array.meta = map._.meta;
 
     return sortKey
         ? array.sort(function(a, b) { return sortKey(a.key, b.key); })
@@ -175,7 +187,7 @@ d3.sgnest = function() {
     var rootNode = {
         name: 'root',
         dim: 'root',
-        records: mop._.meta.records,
+        records: mop.meta.records,
     };
     d3_subclass(rootNode, node_prototype);
     rootNode.children = entries(mop, 0, rootNode);
@@ -210,7 +222,7 @@ d3.sgnest = function() {
     return nest;
   };
   nest.keys = function(a) {
-    if (a instanceof Array)
+    if (Array.isArray(a))
         a.forEach(function(key) { nest.key(key); });
     return nest;
   };
