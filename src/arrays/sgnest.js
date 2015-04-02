@@ -11,8 +11,9 @@ d3.sgnest = function() {
       sortKeys = [],
       sortValues,
       rollup,
-      valueF,
       childrenF = d3_layout_hierarchyChildren,
+      valueF, // could be d3_layout_hierarchyValue, but want it to default to nothing
+      //sortF,  // d3_layout_hierarchySort
       leafNodesAreGroups = true;
 
   function map(mapType, array, depth) {
@@ -24,7 +25,9 @@ d3.sgnest = function() {
                 Object.defineProperty(val, "valueLevel", 
                         { value: true });
             });
+            addMeta(values, values, depth);
         } else {
+            throw new Error("never being called?");
             if (typeof values === "object")
                 Object.defineProperty(values, "valueLevel", 
                         { value: true });
@@ -63,15 +66,17 @@ d3.sgnest = function() {
         object[keyValue] = map(mapType, values, depth);
       };
     }
-
+    addMeta(o, array, depth);
+    valuesByKey.forEach(setter);
+    return object;
+  }
+  function addMeta(o, array, depth) {
     Object.defineProperty(o, "meta", {
             value: {}
         });
     o.meta.records = array;
     if (keynames.length)
         o.meta.dim = keynames[depth-1];
-    valuesByKey.forEach(setter);
-    return object;
   }
 
   function entries(map, depth, parentNode) {
@@ -125,6 +130,11 @@ d3.sgnest = function() {
       if (opts.asArray) return path;
       return path.join(opts.delim);
   };
+  node_prototype.dimPath = function(opts) {
+      opts = delimOpts(opts);
+      opts.dimName = true;
+      return this.namePath(opts);
+  };
   // allows delimitter to be given as single string arg 
   // or in obj, like {delim:'==>'}
   function delimOpts(opts) {
@@ -133,6 +143,26 @@ d3.sgnest = function() {
       if (!_(opts).has('delim')) opts.delim = '/';
       return opts;
   }
+  /*
+  Value.prototype.lookup = function(query, die) {
+    if (query instanceof Array) {
+      if (this.name == query[0]) { // name?
+        query = query.slice(1);
+          if (query.length === 0)
+            return this;
+      }
+    } else if (typeof query === "string" || query instanceof String) {
+      if (this.name == query) {
+        return this;
+      }
+    } else {
+      throw new Error("invalid param: " + query);
+    }
+    if (!this.children())
+      throw new Error("can only call lookup on Values with kids");
+    return this.children().lookup(query, die);
+  };
+  */
 
   sg_hierarchyRebind(nest, sghierarchy);
 
@@ -152,22 +182,17 @@ d3.sgnest = function() {
     return rootNode;
   }
 
-  /*  SHOULD THESE BE PUBLIC?
   nest.map = function(array, mapType) {
     return map(mapType, array, 0);
   };
   nest.entries = function(array) {
     return entries(map(d3.map, array, 0), 0);
   };
-  */
   nest.groups = function(array) {
     return groups(array);
   };
   nest.tree = function(array) {
     return tree(array);
-  };
-  nest.children = function(f) {
-    return groups(array);
   };
   nest.children = function(x) {
     if (!arguments.length) return childrenF;
