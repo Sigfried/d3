@@ -14,7 +14,8 @@ d3.sgnest = function() {
       childrenF = d3_layout_hierarchyChildren,
       valueF, // could be d3_layout_hierarchyValue, but want it to default to nothing
       //sortF,  // d3_layout_hierarchySort
-      cloneRecords = true,
+      cloneRecords = false,
+      noCycles = false,
       leafNodesAreGroups = true;
 
   function map(mapType, array, depth, parentMap) {
@@ -81,12 +82,17 @@ d3.sgnest = function() {
     return object;
   }
   function addMeta(o, array, depth, parentMap) {
-    Object.defineProperty(o, "meta", {
-            value: {
-                records: array,
-                depth: depth,
-            }
+    if (!o.meta)
+      Object.defineProperty(o, "meta", {
+            value: {}
         });
+    else {
+      if (!o.meta.isRecord)
+        console.error("didn't expect meta on a Node already");
+      console.warn("meta already present on raw record");
+    }
+    o.meta.records = array;
+    o.meta.depth = depth;
     if (keynames.length)
         o.meta.dim = (depth > 0) ? keynames[depth-1] : 'root';
     if (parentMap) o.meta.parentMap = parentMap;
@@ -97,13 +103,17 @@ d3.sgnest = function() {
 
     var array = [],
         sortKey = sortKeys[depth++];
-    if (parentNode) array.parentNode = parentNode;
+    if (parentNode && !noCycles) array.parentNode = parentNode;
+    d3_subclass(array, list_prototype);
 
     map.forEach(function(key, keyMap) {
       var entry = {name: key};
       entry.dim = keyMap.meta.dim;
-      if (parentNode) entry.parentNode = parentNode;
-      entry.parentList = array;
+      entry.depth = keyMap.meta.depth;
+      if (!noCycles) {
+        if (parentNode) entry.parentNode = parentNode;
+        entry.parentList = array;
+      }
       var children = entries(keyMap, depth, entry, array);
       if (keyMap.constructor === d3_Map) {
         entry.records = keyMap.meta.records;
@@ -115,14 +125,52 @@ d3.sgnest = function() {
       }
       d3_subclass(entry, node_prototype);
       array.push(entry);
+      map.set(key, entry); // re-use map as entry lookup dict
+      //entry.lookupMap = keyMap;
     });
 
-    return sortKey
+    array = sortKey
         ? array.sort(function(a, b) { return sortKey(a.key, b.key); })
         : array;
+    array.lookupMap = map;
+    return array;
   }
+  var list_prototype = [];
+  list_prototype.lookup = function(query, die) {
+    if (!Array.isArray(query)) {
+      var node = this.lookupMap.get(query);
+    } else if (query.length) {
+      var first = query.shift();
+      if (this.lookupMap.has(first))
+        var node = this.lookupMap.get(first);
+        if (query.length)
+          return node.lookup(query, die);
+    }
+    if (node) return node;
+    if (die)
+      throw new Error("lookup failed");
+  };
+
   var Node = function() {};
   var node_prototype = Node.prototype;
+  node_prototype.lookup = function(query, die) {
+    if (!this.children)
+      throw new Error("can only call lookup on nodes with children");
+    var node = this.children.lookup(query, die);
+    if (!node) {
+      if (Array.isArray(query)) {
+        var lookupStr = query.shift();
+        if (this.name === lookupStr)
+          return this.lookup(query, die); // with remainder of lookup string array
+      } else {
+        if (this.name === query)
+          return this;
+      }
+      if (die)
+        throw new Error("lookup failed");
+    }
+    return node;
+  };
   node_prototype.toString = function() { return this.name };
   node_prototype.path = function(opts) {
       var path = [];
@@ -155,26 +203,6 @@ d3.sgnest = function() {
       if (!_(opts).has('delim')) opts.delim = '/';
       return opts;
   }
-  /*
-  Value.prototype.lookup = function(query, die) {
-    if (query instanceof Array) {
-      if (this.name == query[0]) { // name?
-        query = query.slice(1);
-          if (query.length === 0)
-            return this;
-      }
-    } else if (typeof query === "string" || query instanceof String) {
-      if (this.name == query) {
-        return this;
-      }
-    } else {
-      throw new Error("invalid param: " + query);
-    }
-    if (!this.children())
-      throw new Error("can only call lookup on Values with kids");
-    return this.children().lookup(query, die);
-  };
-  */
 
   sg_hierarchyRebind(nest, sghierarchy);
 
@@ -188,6 +216,7 @@ d3.sgnest = function() {
         name: 'root',
         dim: 'root',
         records: mop.meta.records,
+        lookupMap: mop,
     };
     d3_subclass(rootNode, node_prototype);
     rootNode.children = entries(mop, 0, rootNode);
@@ -252,6 +281,11 @@ d3.sgnest = function() {
   nest.value = function(x) {
     if (!arguments.length) return valueF;
     valueF = x;
+    return nest;
+  };
+  nest.noCycles = function(bool) {
+    if (!arguments.length) return noCycles;
+    noCycles = bool;
     return nest;
   };
 
@@ -345,50 +379,3 @@ function sg_hierarchyRebind(object, hierarchy) {
   return object;
 }
 
-// Pre-order traversal.
-function d3_layout_hierarchyVisitBefore(node, callback) {
-  var nodes = [node];
-  while ((node = nodes.pop()) != null) {
-    callback(node);
-    if ((children = node.children) && (n = children.length)) {
-      var n, children;
-      while (--n >= 0) nodes.push(children[n]);
-    }
-  }
-}
-
-// Post-order traversal.
-function d3_layout_hierarchyVisitAfter(node, callback) {
-  var nodes = [node], nodes2 = [];
-  while ((node = nodes.pop()) != null) {
-    nodes2.push(node);
-    if ((children = node.children) && (n = children.length)) {
-      var i = -1, n, children;
-      while (++i < n) nodes.push(children[i]);
-    }
-  }
-  while ((node = nodes2.pop()) != null) {
-    callback(node);
-  }
-}
-
-function d3_layout_hierarchyChildren(d) {
-  return d.children;
-}
-
-function d3_layout_hierarchyValue(d) {
-  return d.value;
-}
-
-function d3_layout_hierarchySort(a, b) {
-  return b.value - a.value;
-}
-
-// Returns an array source+target objects for the specified nodes.
-function d3_layout_hierarchyLinks(nodes) {
-  return d3.merge(nodes.map(function(parent) {
-    return (parent.children || []).map(function(child) {
-      return {source: parent, target: child};
-    });
-  }));
-}
