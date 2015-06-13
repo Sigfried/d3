@@ -204,7 +204,7 @@ d3.sgnest = function() {
       return opts;
   }
 
-  sg_hierarchyRebind(nest, sghierarchy);
+  sg_hierarchyRebind(nest, d3.sghierarchy);
 
   function groups(array) {
     var mop = map(d3.map, array, 0);
