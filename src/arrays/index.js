@@ -25,3 +25,4 @@ import "map";
 import "set";
 
 import "sgnest";
+import "easynest";
